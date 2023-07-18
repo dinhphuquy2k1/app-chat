@@ -19,4 +19,12 @@ class Message_Recipient extends Model
     public function conversation(){
         return $this->belongsTo(Conversation::class, 'recipient_group_id', 'id');
     }
+
+    public function user(){
+        return $this->hasOne(User::class, 'id', 'recipient_id');
+    }
+
+    public function user_react_message(){
+        return $this->hasOne(User::class, 'id', 'recipient_id');
+    }
 }

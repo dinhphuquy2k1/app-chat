@@ -31,11 +31,14 @@ class UserOffline implements ShouldBroadcast
      */
     public function broadcastOn()
     {
-        return new PresenceChannel('user-active-channel');
+        return [
+            new PresenceChannel('user-active-channel-1'),
+        ];
+        // return new PresenceChannel('user-active-channel-1');
     }
 
     public function broadcastAs()
     {
-        return 'user-online-event';
+        return 'user-offline-event';
     }
 }

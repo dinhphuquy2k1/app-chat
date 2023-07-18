@@ -34,6 +34,7 @@ Route::group(['middleware' => 'jwt.vertifyJWTToken'], function () {
     Route::get('/fetch/conversationWithNewMessage', [HomeController::class, 'getConversationWithNewMessage']);
     Route::get('cuser/fetch/user', [HomeController::class, 'getUserByCUser']);
     Route::get('refreshToken', [HomeController::class, 'refresh']);
+    // Route::post('/pusher/auth', [HomeController::class, 'pusherAuth']);
     Route::put('/user/online', function(){
         return App::call('App\Http\Controllers\HomeController@setUserActivityStatus', ['status' => UserActive::ACTIVE]);
     });

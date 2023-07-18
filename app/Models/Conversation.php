@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\ReactType;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use App\Models\User;
@@ -12,6 +13,7 @@ use App\Enums\ReponseStatus;
 use App\Models\Commons\HttpResponse;
 use App\Models\Message_Recipient;
 use App\Enums\MessageType;
+use DB;
 
 class Conversation extends Model
 {
@@ -44,8 +46,18 @@ class Conversation extends Model
         return $this->hasMany(
             Message_Recipient::class,
             'recipient_group_id',
-            'id'
+            'id',
         );
+    }
+
+    public function message_messageRecipients()
+    {
+        return $this->hasManyThrough(Message_Recipient::class, Message::class, 'conversation_id', 'message_id', 'id', 'id');
+    }
+
+    public function user_messagesRecipiends()
+    {
+        return $this->hasManyThrough(User::class, Message_Recipient::class, 'recipient_group_id', 'id', 'id', 'recipient_id');
     }
 
     public function test()
@@ -137,9 +149,9 @@ class Conversation extends Model
         try {
             $messageRecipient = $this->getMessageRecipientFromUser($userId);
             $messageRecipient->update(['read_status' => MessageType::READ]);
-            $participant = $this->getParticipantFromUser($userId);
-            $participant->last_read = new Carbon();
-            $participant->save();
+            // $participant = $this->getParticipantFromUser($userId);
+            // $participant->last_read = new Carbon();
+            // $participant->save();
         } catch (ModelNotFoundException $e) { // @codeCoverageIgnore
             return HttpResponse::error("Không tìm thấy user có id là $userId", ReponseStatus::HTTP_UNPROCESSABLE_ENTITY);
         }
@@ -169,37 +181,13 @@ class Conversation extends Model
     public function scopeForUserWithNewMessages(Builder $query, $userId, $pageIndex)
     {
         $recordsPerPage = 15;
-        // $sql =  $this->whereHas(
-        //     'latestMessage',
-        //     function ($query) use ($userId) {
-        //         $query->where('sender_id', $userId);
-        //     },
-        //     )
-        //     ->orWhereHas('lastestMessageRecipient', function ($query) use ($userId) {
-        //         $query->where('recipient_id', $userId);
-        //     })
-        //     ->with('users', function($query) use($userId){
-        //         $query->where('users.id', '!=', $userId);
-        //     })
-        //     ->with('userRecipient', 'latestMessage', 'lastestMessageRecipient');
-        //     dd($sql->toSql());
-        // ->latest('updated_at')
-        // ->skip(($pageIndex - 1) * $recordsPerPage)
-        // ->take($recordsPerPage)
-        // ->get()
-        // ->map(function ($item) {
-        //     $mergedData = array_merge($item->latestMessage->toArray(), $item->lastestMessageRecipient->toArray(), $item->userRecipient->toArray());
-        //     $item->setAttribute('messages', $mergedData);
-        //     unset($item->latestMessage, $item->lastestMessageRecipient, $item->userRecipient);
-        //     return $item;
-        // })
-        // ->toArray();
+
         return $this->whereHas(
             'latestMessage',
             function ($query) use ($userId) {
                 $query->where('sender_id', $userId);
             },
-            )
+        )
             ->orWhereHas('participant', function ($query) use ($userId) {
                 $query->where('user_id', $userId);
             })
@@ -311,33 +299,32 @@ class Conversation extends Model
         return $users->toArray();
     }
 
+
+
     /**
-     * Lấy danh sách tin nhắn trong cuộc trò chuyện
+     * getMessage
      *
-     * @param mixed $userId
-     *
-     * @return mixed
-     *
-     * @throws ModelNotFoundException
+     * @param  mixed $pageIndex
+     * @param  mixed $offset
+     * @return
      */
-    public function getMessage($pageIndex = 1)
+    public function getMessage($pageIndex = 1, $offset = 0)
     {
         $recordsPerPage = 20;
-        $conversationTable = 'conversations';
         $messageTable = 'messages';
-        $messageRecipientTable = 'message__recipients';
-        return $this->join("$messageTable as m", "$conversationTable.id", '=', "m.conversation_id")
-            ->join($messageRecipientTable, "$messageRecipientTable.recipient_group_id", '=', "$conversationTable.id")
-            ->leftJoin("$messageTable as m1", function ($join) {
-                $join->on('m1.id', 'm.parent_message_id')
-                    ->where('m.parent_message_id', '!=', null);
+        return $this->messages()
+            ->with(['message_recipients' => function ($query){
+                $query->where('react_status', '!=', 0);
+                $query->with('user_react_message');
+            }, 'userSender'])
+            ->leftJoin("$messageTable as m1", function ($join) use ($messageTable) {
+                $join->on('m1.id', "$messageTable.parent_message_id")
+                    ->where("$messageTable.parent_message_id", '!=', null);
             })
-            ->where("m.message_type", '!=', MessageType::EMOTION)
-            ->where($this->getQualifiedKeyName(), '=', $this->id)
-            ->whereRaw("$messageRecipientTable.message_id = m.id")
-            ->select("m.*", "$messageRecipientTable.* ", "$conversationTable.*", "m1.message as parent_message", "m1.message_type as parent_message_type", "m.updated_at", "m.created_at")
-            ->skip(($pageIndex - 1) * $recordsPerPage)
+            ->where("$messageTable.message_type", '!=', MessageType::EMOTION)
+            ->select("$messageTable.*", "m1.message as parent_message", "m1.message_type as parent_message_type", "$messageTable.updated_at", "$messageTable.created_at")
+            ->skip($offset)
             ->take($recordsPerPage)
-            ->latest("m.updated_at");
+            ->latest("$messageTable.updated_at");
     }
 }

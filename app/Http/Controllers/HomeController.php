@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\UserActive;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use App\Models\User;
@@ -19,11 +20,14 @@ use App\Models\Message_Recipient;
 use Validator;
 use Illuminate\Validation\Rule;
 use App\Events\ChatEvent;
+use App\Events\UserOffline;
+use App\Events\UserOnline;
 use App\Events\CreatedConversationEvent;
+use Pusher\Pusher;
+use Illuminate\Support\Facades\Broadcast;
 
 class HomeController extends Controller
 {
-
     /**
      * api send Message
      */
@@ -120,14 +124,14 @@ class HomeController extends Controller
         $userIds = array_unique($userIds);
         $conversation = [];
 
-        if(count($userIds) == 2){
+        if (count($userIds) == 2) {
             //kiểm tra có cuộc hội thoại nào ko giữa 2 user
             $conversation = Conversation::forBetweenOnly($userIds);
         }
 
         try {
             DB::beginTransaction();
-            if(!$conversation){
+            if (!$conversation) {
                 $conversation = Conversation::create([
                     'creator_id' => $user->id,
                     'name' => $name
@@ -193,7 +197,7 @@ class HomeController extends Controller
                     }
                 }
 
-                if ($contentMessage) {
+                if ($contentMessage && $reactType == ReactType::NONE) {
                     $message_type = MessageType::TEXT;
                     $message = Message::create([
                         'sender_id' => $user->id,
@@ -218,10 +222,11 @@ class HomeController extends Controller
 
                 if ($parent_message_id) {
                     if ($reactType != ReactType::NONE) {
-                        $message_type = $reactType != ReactType::NONE > MessageType::EMOTION;
+                        $message_type = $reactType != ReactType::NONE ? MessageType::EMOTION : MessageType::TEXT;
                         Message_Recipient::where('message_id', $parent_message_id)->where('recipient_id', $user->id)->update([
                             'react_status' => $reactType
                         ]);
+                        $message = Message::find($parent_message_id);
                     }
                 }
 
@@ -246,6 +251,16 @@ class HomeController extends Controller
         $user = $request->get('user');
         $user->is_active = $status;
         $user->save();
+        switch ($status) {
+            case UserActive::ACTIVE:
+                event(new UserOnline($user));
+                broadcast(new UserOnline($user))->toOthers();
+                break;
+            case UserActive::INACTIVE:
+                event(new UserOffline($user));
+                broadcast(new UserOffline($user))->toOthers();
+                break;
+        }
     }
 
     /**
@@ -270,7 +285,8 @@ class HomeController extends Controller
         //cập nhật trạng thái đọc tin nhắn
         $conversation->markAsRead(request()->get('user')->id);
         $pageIndex = request()->get('pageIndex', 1);
-        return HttpResponse::success($conversation->getMessage($pageIndex)->get()->toArray());
+        $offset = request()->get('offset', 0);
+        return HttpResponse::success($conversation->getMessage($pageIndex, $offset)->get()->toArray());
     }
 
     /**
